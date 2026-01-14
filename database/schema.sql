@@ -1,35 +1,39 @@
--- MySQL Schema for PHP Virtual Number Platform
--- Created: 2026-01-14 12:23:55 UTC
--- Description: Complete database schema for virtual number platform
+-- Virtual Number Platform Database Schema
+-- Created: 2026-01-14
+-- This schema contains tables for managing virtual numbers, orders, and messaging
 
 -- =====================================================
 -- USERS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS `users` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `username` VARCHAR(255) NOT NULL UNIQUE,
   `email` VARCHAR(255) NOT NULL UNIQUE,
   `password_hash` VARCHAR(255) NOT NULL,
   `full_name` VARCHAR(255),
+  `avatar_url` VARCHAR(500),
   `phone_number` VARCHAR(20),
-  `profile_picture_url` VARCHAR(500),
-  `bio` TEXT,
   `country` VARCHAR(100),
   `city` VARCHAR(100),
   `address` TEXT,
   `postal_code` VARCHAR(20),
-  `account_type` ENUM('personal', 'business') DEFAULT 'personal',
-  `status` ENUM('active', 'inactive', 'suspended', 'deleted') DEFAULT 'active',
-  `email_verified` BOOLEAN DEFAULT FALSE,
-  `phone_verified` BOOLEAN DEFAULT FALSE,
-  `two_factor_enabled` BOOLEAN DEFAULT FALSE,
+  `account_type` ENUM('personal', 'business', 'developer') DEFAULT 'personal',
+  `account_status` ENUM('active', 'suspended', 'banned', 'pending_verification') DEFAULT 'pending_verification',
+  `email_verified_at` TIMESTAMP NULL,
+  `phone_verified_at` TIMESTAMP NULL,
   `last_login_at` TIMESTAMP NULL,
+  `balance` DECIMAL(15, 2) DEFAULT 0.00,
+  `currency` VARCHAR(3) DEFAULT 'USD',
+  `notifications_email` BOOLEAN DEFAULT TRUE,
+  `notifications_sms` BOOLEAN DEFAULT FALSE,
+  `api_key` VARCHAR(255) UNIQUE,
+  `api_secret` VARCHAR(255),
+  `two_factor_enabled` BOOLEAN DEFAULT FALSE,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at` TIMESTAMP NULL,
-  INDEX `idx_email` (`email`),
   INDEX `idx_username` (`username`),
-  INDEX `idx_status` (`status`),
+  INDEX `idx_email` (`email`),
+  INDEX `idx_account_status` (`account_status`),
   INDEX `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -37,264 +41,370 @@ CREATE TABLE IF NOT EXISTS `users` (
 -- PROVIDERS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS `providers` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `name` VARCHAR(255) NOT NULL UNIQUE,
-  `slug` VARCHAR(255) NOT NULL UNIQUE,
+  `display_name` VARCHAR(255) NOT NULL,
   `description` TEXT,
   `logo_url` VARCHAR(500),
-  `website` VARCHAR(500),
+  `website_url` VARCHAR(500),
+  `country` VARCHAR(100) NOT NULL,
+  `supported_countries` JSON,
+  `api_endpoint` VARCHAR(500),
   `api_key` VARCHAR(500),
   `api_secret` VARCHAR(500),
-  `api_endpoint` VARCHAR(500),
-  `country` VARCHAR(100),
-  `supported_services` JSON,
-  `status` ENUM('active', 'inactive', 'testing', 'deprecated') DEFAULT 'active',
-  `rating` DECIMAL(3, 2) DEFAULT 0.00,
-  `total_ratings` INT DEFAULT 0,
-  `success_rate` DECIMAL(5, 2) DEFAULT 100.00,
-  `total_transactions` INT UNSIGNED DEFAULT 0,
-  `response_time_ms` INT DEFAULT 0,
-  `uptime_percentage` DECIMAL(5, 2) DEFAULT 100.00,
-  `support_email` VARCHAR(255),
-  `support_phone` VARCHAR(20),
+  `is_active` BOOLEAN DEFAULT TRUE,
+  `provider_type` ENUM('sms', 'voice', 'both') DEFAULT 'both',
+  `verification_method` ENUM('instant', 'manual', 'automatic') DEFAULT 'automatic',
+  `rate_per_number` DECIMAL(10, 2) NOT NULL,
+  `monthly_fee` DECIMAL(10, 2) DEFAULT 0.00,
+  `retention_days` INT DEFAULT 30,
+  `connection_status` ENUM('connected', 'disconnected', 'error') DEFAULT 'disconnected',
+  `last_checked_at` TIMESTAMP NULL,
+  `failure_count` INT DEFAULT 0,
+  `notes` TEXT,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY `idx_slug` (`slug`),
-  INDEX `idx_status` (`status`),
-  INDEX `idx_country` (`country`)
+  INDEX `idx_name` (`name`),
+  INDEX `idx_is_active` (`is_active`),
+  INDEX `idx_country` (`country`),
+  INDEX `idx_connection_status` (`connection_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
--- NUMBERS TABLE
+-- VIRTUAL NUMBERS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS `numbers` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `provider_id` INT UNSIGNED NOT NULL,
-  `number` VARCHAR(20) NOT NULL UNIQUE,
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `provider_id` BIGINT UNSIGNED NOT NULL,
+  `phone_number` VARCHAR(20) NOT NULL,
   `country_code` VARCHAR(5) NOT NULL,
-  `country_name` VARCHAR(100),
-  `service_type` VARCHAR(100),
-  `number_type` ENUM('mobile', 'landline', 'toll-free', 'virtual') DEFAULT 'virtual',
-  `is_available` BOOLEAN DEFAULT TRUE,
-  `owner_user_id` INT UNSIGNED,
-  `rental_start_date` TIMESTAMP NULL,
-  `rental_end_date` TIMESTAMP NULL,
+  `area_code` VARCHAR(10),
+  `service_type` ENUM('sms', 'voice', 'both') DEFAULT 'both',
+  `number_type` ENUM('local', 'toll_free', 'mobile') DEFAULT 'local',
+  `is_active` BOOLEAN DEFAULT TRUE,
+  `verification_status` ENUM('pending', 'verified', 'failed', 'expired') DEFAULT 'pending',
+  `purchase_date` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `activation_date` TIMESTAMP NULL,
+  `expiration_date` TIMESTAMP NULL,
+  `renewal_date` TIMESTAMP NULL,
+  `renewal_cost` DECIMAL(10, 2),
   `auto_renewal` BOOLEAN DEFAULT TRUE,
-  `monthly_cost` DECIMAL(10, 2),
-  `yearly_cost` DECIMAL(10, 2),
-  `price` DECIMAL(10, 2) NOT NULL,
-  `currency` VARCHAR(3) DEFAULT 'USD',
-  `status` ENUM('available', 'rented', 'reserved', 'inactive', 'expired') DEFAULT 'available',
-  `rating` DECIMAL(3, 2) DEFAULT 0.00,
-  `features` JSON,
-  `description` TEXT,
-  `sms_enabled` BOOLEAN DEFAULT TRUE,
-  `call_enabled` BOOLEAN DEFAULT TRUE,
+  `forwarding_number` VARCHAR(20),
+  `forwarding_enabled` BOOLEAN DEFAULT FALSE,
+  `call_recording_enabled` BOOLEAN DEFAULT FALSE,
+  `call_recording_url` VARCHAR(500),
+  `usage_count` INT DEFAULT 0,
+  `message_count` INT DEFAULT 0,
+  `last_used_at` TIMESTAMP NULL,
+  `provider_reference_id` VARCHAR(255),
+  `notes` TEXT,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`provider_id`) REFERENCES `providers` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`owner_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  INDEX `idx_number` (`number`),
-  INDEX `idx_country_code` (`country_code`),
-  INDEX `idx_is_available` (`is_available`),
-  INDEX `idx_owner_user_id` (`owner_user_id`),
-  INDEX `idx_status` (`status`),
-  INDEX `idx_provider_id` (`provider_id`)
+  FOREIGN KEY `fk_numbers_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY `fk_numbers_provider_id` (`provider_id`) REFERENCES `providers` (`id`) ON DELETE RESTRICT,
+  UNIQUE KEY `uq_phone_number_provider` (`phone_number`, `provider_id`),
+  INDEX `idx_user_id` (`user_id`),
+  INDEX `idx_provider_id` (`provider_id`),
+  INDEX `idx_is_active` (`is_active`),
+  INDEX `idx_verification_status` (`verification_status`),
+  INDEX `idx_expiration_date` (`expiration_date`),
+  INDEX `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
 -- ORDERS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS `orders` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `order_number` VARCHAR(255) NOT NULL UNIQUE,
-  `user_id` INT UNSIGNED NOT NULL,
-  `number_id` INT UNSIGNED NOT NULL,
-  `provider_id` INT UNSIGNED NOT NULL,
-  `order_type` ENUM('rental', 'purchase', 'renewal', 'upgrade', 'downgrade') DEFAULT 'rental',
-  `duration_days` INT,
-  `duration_type` ENUM('days', 'months', 'years', 'lifetime') DEFAULT 'months',
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `number_id` BIGINT UNSIGNED,
+  `provider_id` BIGINT UNSIGNED NOT NULL,
+  `order_type` ENUM('purchase', 'renewal', 'upgrade', 'downgrade') DEFAULT 'purchase',
   `quantity` INT DEFAULT 1,
   `unit_price` DECIMAL(10, 2) NOT NULL,
-  `discount_amount` DECIMAL(10, 2) DEFAULT 0.00,
-  `tax_amount` DECIMAL(10, 2) DEFAULT 0.00,
-  `total_amount` DECIMAL(10, 2) NOT NULL,
+  `total_amount` DECIMAL(15, 2) NOT NULL,
+  `discount_amount` DECIMAL(15, 2) DEFAULT 0.00,
+  `tax_amount` DECIMAL(15, 2) DEFAULT 0.00,
+  `final_amount` DECIMAL(15, 2) NOT NULL,
   `currency` VARCHAR(3) DEFAULT 'USD',
-  `payment_method` ENUM('credit_card', 'debit_card', 'paypal', 'stripe', 'crypto', 'bank_transfer', 'wallet') DEFAULT 'credit_card',
-  `payment_status` ENUM('pending', 'processing', 'completed', 'failed', 'refunded', 'cancelled') DEFAULT 'pending',
+  `payment_method` ENUM('credit_card', 'paypal', 'bank_transfer', 'crypto', 'wallet') NOT NULL,
+  `payment_reference_id` VARCHAR(255),
   `transaction_id` VARCHAR(255),
-  `status` ENUM('pending', 'confirmed', 'active', 'completed', 'cancelled', 'expired') DEFAULT 'pending',
-  `rental_start_date` TIMESTAMP NULL,
-  `rental_end_date` TIMESTAMP NULL,
-  `auto_renew` BOOLEAN DEFAULT TRUE,
+  `order_status` ENUM('pending', 'processing', 'completed', 'failed', 'cancelled', 'refunded') DEFAULT 'pending',
+  `payment_status` ENUM('unpaid', 'paid', 'partially_refunded', 'fully_refunded') DEFAULT 'unpaid',
+  `coupon_code` VARCHAR(100),
+  `billing_cycle` ENUM('monthly', 'quarterly', 'yearly', 'one_time') DEFAULT 'one_time',
+  `next_billing_date` TIMESTAMP NULL,
+  `activation_date` TIMESTAMP NULL,
+  `completion_date` TIMESTAMP NULL,
+  `cancellation_date` TIMESTAMP NULL,
+  `cancellation_reason` TEXT,
+  `refund_amount` DECIMAL(15, 2) DEFAULT 0.00,
+  `refund_date` TIMESTAMP NULL,
   `notes` TEXT,
-  `ip_address` VARCHAR(45),
-  `user_agent` VARCHAR(500),
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `completed_at` TIMESTAMP NULL,
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`number_id`) REFERENCES `numbers` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`provider_id`) REFERENCES `providers` (`id`) ON DELETE CASCADE,
-  UNIQUE KEY `idx_order_number` (`order_number`),
+  FOREIGN KEY `fk_orders_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY `fk_orders_number_id` (`number_id`) REFERENCES `numbers` (`id`) ON DELETE SET NULL,
+  FOREIGN KEY `fk_orders_provider_id` (`provider_id`) REFERENCES `providers` (`id`) ON DELETE RESTRICT,
   INDEX `idx_user_id` (`user_id`),
-  INDEX `idx_number_id` (`number_id`),
   INDEX `idx_provider_id` (`provider_id`),
-  INDEX `idx_status` (`status`),
+  INDEX `idx_number_id` (`number_id`),
+  INDEX `idx_order_status` (`order_status`),
   INDEX `idx_payment_status` (`payment_status`),
-  INDEX `idx_created_at` (`created_at`)
+  INDEX `idx_created_at` (`created_at`),
+  INDEX `idx_completion_date` (`completion_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
 -- MESSAGES TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS `messages` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `number_id` INT UNSIGNED NOT NULL,
-  `provider_id` INT UNSIGNED NOT NULL,
-  `order_id` INT UNSIGNED,
-  `user_id` INT UNSIGNED NOT NULL,
-  `sender_number` VARCHAR(20),
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `number_id` BIGINT UNSIGNED NOT NULL,
+  `provider_id` BIGINT UNSIGNED NOT NULL,
+  `message_type` ENUM('inbound', 'outbound') DEFAULT 'inbound',
+  `sender_number` VARCHAR(20) NOT NULL,
   `recipient_number` VARCHAR(20) NOT NULL,
-  `message_type` ENUM('sms', 'mms', 'call', 'whatsapp', 'telegram', 'email') DEFAULT 'sms',
-  `message_content` LONGTEXT,
-  `message_subject` VARCHAR(255),
-  `attachments` JSON,
-  `status` ENUM('received', 'sent', 'pending', 'failed', 'read', 'delivered') DEFAULT 'received',
-  `direction` ENUM('inbound', 'outbound') DEFAULT 'inbound',
+  `message_content` LONGTEXT NOT NULL,
   `message_length` INT,
-  `character_count` INT,
+  `part_count` INT DEFAULT 1,
+  `status` ENUM('received', 'sent', 'failed', 'pending', 'delivered') DEFAULT 'received',
+  `delivery_status` ENUM('pending', 'delivered', 'failed', 'read') DEFAULT 'pending',
+  `error_code` VARCHAR(50),
+  `error_message` TEXT,
+  `provider_message_id` VARCHAR(255),
+  `reply_to_message_id` BIGINT UNSIGNED,
   `is_read` BOOLEAN DEFAULT FALSE,
   `read_at` TIMESTAMP NULL,
-  `response_required` BOOLEAN DEFAULT FALSE,
-  `is_spam` BOOLEAN DEFAULT FALSE,
-  `is_archived` BOOLEAN DEFAULT FALSE,
-  `priority` ENUM('low', 'normal', 'high', 'urgent') DEFAULT 'normal',
-  `tags` JSON,
-  `external_message_id` VARCHAR(255),
-  `error_code` VARCHAR(50),
-  `error_message` VARCHAR(500),
+  `cost` DECIMAL(10, 2),
+  `webhook_url` VARCHAR(500),
+  `webhook_status` ENUM('pending', 'sent', 'failed') DEFAULT 'pending',
+  `webhook_response` TEXT,
   `retry_count` INT DEFAULT 0,
+  `last_retry_at` TIMESTAMP NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`number_id`) REFERENCES `numbers` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`provider_id`) REFERENCES `providers` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE SET NULL,
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  INDEX `idx_number_id` (`number_id`),
+  FOREIGN KEY `fk_messages_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY `fk_messages_number_id` (`number_id`) REFERENCES `numbers` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY `fk_messages_provider_id` (`provider_id`) REFERENCES `providers` (`id`) ON DELETE RESTRICT,
   INDEX `idx_user_id` (`user_id`),
-  INDEX `idx_status` (`status`),
-  INDEX `idx_direction` (`direction`),
+  INDEX `idx_number_id` (`number_id`),
+  INDEX `idx_provider_id` (`provider_id`),
   INDEX `idx_message_type` (`message_type`),
-  INDEX `idx_recipient_number` (`recipient_number`),
+  INDEX `idx_status` (`status`),
   INDEX `idx_sender_number` (`sender_number`),
+  INDEX `idx_recipient_number` (`recipient_number`),
   INDEX `idx_is_read` (`is_read`),
   INDEX `idx_created_at` (`created_at`),
-  INDEX `idx_order_id` (`order_id`)
+  INDEX `idx_user_number_created` (`user_id`, `number_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
--- ADDITIONAL SUPPORTING TABLES
+-- CALL LOGS TABLE
 -- =====================================================
-
--- Wallet/Balance Table
-CREATE TABLE IF NOT EXISTS `wallet_balance` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `user_id` INT UNSIGNED NOT NULL UNIQUE,
-  `balance` DECIMAL(15, 2) DEFAULT 0.00,
-  `currency` VARCHAR(3) DEFAULT 'USD',
-  `total_deposited` DECIMAL(15, 2) DEFAULT 0.00,
-  `total_spent` DECIMAL(15, 2) DEFAULT 0.00,
-  `last_transaction_at` TIMESTAMP NULL,
+CREATE TABLE IF NOT EXISTS `call_logs` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `number_id` BIGINT UNSIGNED NOT NULL,
+  `provider_id` BIGINT UNSIGNED NOT NULL,
+  `caller_number` VARCHAR(20) NOT NULL,
+  `recipient_number` VARCHAR(20) NOT NULL,
+  `call_type` ENUM('incoming', 'outgoing', 'missed') DEFAULT 'incoming',
+  `call_status` ENUM('connected', 'no_answer', 'busy', 'failed', 'completed') DEFAULT 'completed',
+  `duration_seconds` INT DEFAULT 0,
+  `start_time` TIMESTAMP NOT NULL,
+  `end_time` TIMESTAMP NULL,
+  `recording_url` VARCHAR(500),
+  `recording_duration` INT,
+  `provider_call_id` VARCHAR(255),
+  `country_code` VARCHAR(5),
+  `cost` DECIMAL(10, 2),
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  FOREIGN KEY `fk_call_logs_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY `fk_call_logs_number_id` (`number_id`) REFERENCES `numbers` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY `fk_call_logs_provider_id` (`provider_id`) REFERENCES `providers` (`id`) ON DELETE RESTRICT,
+  INDEX `idx_user_id` (`user_id`),
+  INDEX `idx_number_id` (`number_id`),
+  INDEX `idx_call_type` (`call_type`),
+  INDEX `idx_start_time` (`start_time`),
+  INDEX `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Payment Transactions Table
-CREATE TABLE IF NOT EXISTS `payment_transactions` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `user_id` INT UNSIGNED NOT NULL,
-  `order_id` INT UNSIGNED,
-  `transaction_type` ENUM('deposit', 'withdrawal', 'payment', 'refund', 'transfer') DEFAULT 'payment',
+-- =====================================================
+-- TRANSACTIONS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `transactions` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `order_id` BIGINT UNSIGNED,
+  `transaction_type` ENUM('credit', 'debit', 'refund', 'adjustment') DEFAULT 'debit',
   `amount` DECIMAL(15, 2) NOT NULL,
   `currency` VARCHAR(3) DEFAULT 'USD',
-  `payment_method` ENUM('credit_card', 'debit_card', 'paypal', 'stripe', 'crypto', 'bank_transfer', 'wallet') DEFAULT 'credit_card',
-  `status` ENUM('pending', 'processing', 'completed', 'failed', 'refunded') DEFAULT 'pending',
-  `gateway_transaction_id` VARCHAR(255),
-  `reference_number` VARCHAR(255),
-  `description` TEXT,
-  `ip_address` VARCHAR(45),
+  `balance_before` DECIMAL(15, 2),
+  `balance_after` DECIMAL(15, 2),
+  `description` VARCHAR(500),
+  `reference_id` VARCHAR(255),
+  `payment_method` VARCHAR(100),
+  `status` ENUM('completed', 'pending', 'failed') DEFAULT 'pending',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE SET NULL,
+  FOREIGN KEY `fk_transactions_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY `fk_transactions_order_id` (`order_id`) REFERENCES `orders` (`id`) ON DELETE SET NULL,
   INDEX `idx_user_id` (`user_id`),
+  INDEX `idx_order_id` (`order_id`),
+  INDEX `idx_transaction_type` (`transaction_type`),
   INDEX `idx_status` (`status`),
   INDEX `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Reviews and Ratings Table
-CREATE TABLE IF NOT EXISTS `reviews` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `user_id` INT UNSIGNED NOT NULL,
-  `number_id` INT UNSIGNED NOT NULL,
-  `order_id` INT UNSIGNED,
-  `rating` INT CHECK (rating >= 1 AND rating <= 5),
-  `title` VARCHAR(255),
-  `comment` TEXT,
-  `helpful_count` INT DEFAULT 0,
-  `unhelpful_count` INT DEFAULT 0,
-  `is_verified_purchase` BOOLEAN DEFAULT FALSE,
-  `status` ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`number_id`) REFERENCES `numbers` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE SET NULL,
-  INDEX `idx_number_id` (`number_id`),
-  INDEX `idx_user_id` (`user_id`),
-  INDEX `idx_rating` (`rating`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Support Tickets Table
-CREATE TABLE IF NOT EXISTS `support_tickets` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `ticket_number` VARCHAR(255) NOT NULL UNIQUE,
-  `user_id` INT UNSIGNED NOT NULL,
-  `order_id` INT UNSIGNED,
-  `subject` VARCHAR(500) NOT NULL,
-  `description` LONGTEXT NOT NULL,
-  `priority` ENUM('low', 'normal', 'high', 'urgent') DEFAULT 'normal',
-  `category` VARCHAR(100),
-  `status` ENUM('open', 'in_progress', 'waiting_customer', 'resolved', 'closed') DEFAULT 'open',
-  `assigned_to_user_id` INT UNSIGNED,
-  `resolution_notes` LONGTEXT,
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `resolved_at` TIMESTAMP NULL,
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE SET NULL,
-  FOREIGN KEY (`assigned_to_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  INDEX `idx_user_id` (`user_id`),
-  INDEX `idx_status` (`status`),
-  INDEX `idx_created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Activity Log Table
-CREATE TABLE IF NOT EXISTS `activity_logs` (
-  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `user_id` INT UNSIGNED,
+-- =====================================================
+-- AUDIT LOGS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `audit_logs` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED,
   `action` VARCHAR(255) NOT NULL,
   `entity_type` VARCHAR(100),
-  `entity_id` INT UNSIGNED,
-  `changes` JSON,
+  `entity_id` BIGINT UNSIGNED,
+  `old_values` JSON,
+  `new_values` JSON,
   `ip_address` VARCHAR(45),
-  `user_agent` VARCHAR(500),
-  `status` ENUM('success', 'failure', 'warning') DEFAULT 'success',
+  `user_agent` TEXT,
+  `status` VARCHAR(50),
+  `error_message` TEXT,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  FOREIGN KEY `fk_audit_logs_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   INDEX `idx_user_id` (`user_id`),
   INDEX `idx_action` (`action`),
+  INDEX `idx_entity_type` (`entity_type`),
   INDEX `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- VERIFICATION CODES TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `verification_codes` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `code` VARCHAR(10) NOT NULL,
+  `code_type` ENUM('email', 'sms', '2fa') DEFAULT 'email',
+  `target` VARCHAR(255) NOT NULL,
+  `is_used` BOOLEAN DEFAULT FALSE,
+  `used_at` TIMESTAMP NULL,
+  `expires_at` TIMESTAMP NOT NULL,
+  `attempts` INT DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY `fk_verification_codes_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  INDEX `idx_user_id` (`user_id`),
+  INDEX `idx_code_type` (`code_type`),
+  INDEX `idx_is_used` (`is_used`),
+  INDEX `idx_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- COUPONS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `coupons` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `code` VARCHAR(100) NOT NULL UNIQUE,
+  `discount_type` ENUM('percentage', 'fixed_amount') DEFAULT 'percentage',
+  `discount_value` DECIMAL(10, 2) NOT NULL,
+  `max_discount_amount` DECIMAL(15, 2),
+  `min_order_amount` DECIMAL(15, 2),
+  `usage_limit` INT,
+  `usage_count` INT DEFAULT 0,
+  `per_user_limit` INT DEFAULT 1,
+  `is_active` BOOLEAN DEFAULT TRUE,
+  `start_date` TIMESTAMP,
+  `end_date` TIMESTAMP,
+  `applicable_to` ENUM('all', 'providers', 'services') DEFAULT 'all',
+  `applicable_providers` JSON,
+  `created_by` BIGINT UNSIGNED,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_code` (`code`),
+  INDEX `idx_is_active` (`is_active`),
+  INDEX `idx_start_date` (`start_date`),
+  INDEX `idx_end_date` (`end_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- WEBHOOK LOGS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `webhook_logs` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `event_type` VARCHAR(100) NOT NULL,
+  `webhook_url` VARCHAR(500) NOT NULL,
+  `payload` JSON,
+  `response_code` INT,
+  `response_body` TEXT,
+  `attempt_count` INT DEFAULT 1,
+  `last_attempt_at` TIMESTAMP,
+  `status` ENUM('pending', 'delivered', 'failed') DEFAULT 'pending',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY `fk_webhook_logs_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  INDEX `idx_user_id` (`user_id`),
+  INDEX `idx_event_type` (`event_type`),
+  INDEX `idx_status` (`status`),
+  INDEX `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- USER NOTIFICATIONS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `user_notifications` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `notification_type` VARCHAR(100) NOT NULL,
+  `title` VARCHAR(255) NOT NULL,
+  `message` TEXT NOT NULL,
+  `data` JSON,
+  `is_read` BOOLEAN DEFAULT FALSE,
+  `read_at` TIMESTAMP NULL,
+  `action_url` VARCHAR(500),
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY `fk_user_notifications_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  INDEX `idx_user_id` (`user_id`),
+  INDEX `idx_is_read` (`is_read`),
+  INDEX `idx_notification_type` (`notification_type`),
+  INDEX `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- SETTINGS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `settings` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED,
+  `setting_key` VARCHAR(255) NOT NULL,
+  `setting_value` LONGTEXT,
+  `setting_type` VARCHAR(50),
+  `is_global` BOOLEAN DEFAULT FALSE,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY `fk_settings_user_id` (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  UNIQUE KEY `uq_setting_key` (`setting_key`, `user_id`, `is_global`),
+  INDEX `idx_user_id` (`user_id`),
+  INDEX `idx_is_global` (`is_global`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- INDICES FOR PERFORMANCE
+-- =====================================================
+
+-- Additional compound indices for common queries
+CREATE INDEX IF NOT EXISTS `idx_numbers_user_active` ON `numbers` (`user_id`, `is_active`);
+CREATE INDEX IF NOT EXISTS `idx_messages_user_read` ON `messages` (`user_id`, `is_read`, `created_at`);
+CREATE INDEX IF NOT EXISTS `idx_orders_user_status` ON `orders` (`user_id`, `order_status`, `created_at`);
+CREATE INDEX IF NOT EXISTS `idx_call_logs_user_time` ON `call_logs` (`user_id`, `start_time`);
+
+-- =====================================================
+-- END OF SCHEMA
+-- =====================================================
